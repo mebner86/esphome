@@ -24,11 +24,6 @@ enum RhtAccelerationMode : uint16_t {
   HIGH_ACCELERATION = 2,
 };
 
-struct Sen5xBaselines {
-  int32_t state0;
-  int32_t state1;
-} PACKED;  // NOLINT
-
 struct GasTuning {
   uint16_t index_offset;
   uint16_t learning_time_offset_hours;
@@ -44,11 +39,9 @@ struct TemperatureCompensation {
   uint16_t time_constant;
 };
 
-// Shortest time interval of 3H for storing baseline values.
+// Shortest time interval of 2H (in milliseconds) for storing baseline values.
 // Prevents wear of the flash because of too many write operations
-static const uint32_t SHORTEST_BASELINE_STORE_INTERVAL = 10800;
-// Store anyway if the baseline difference exceeds the max storage diff value
-static const uint32_t MAXIMUM_STORAGE_DIFF = 50;
+static const uint32_t SHORTEST_BASELINE_STORE_INTERVAL = 2 * 60 * 60 * 1000;
 
 class SEN5XComponent : public PollingComponent, public sensirion_common::SensirionI2CDevice {
  public:
@@ -107,7 +100,8 @@ class SEN5XComponent : public PollingComponent, public sensirion_common::Sensiri
   bool write_tuning_parameters_(uint16_t i2c_command, const GasTuning &tuning);
   bool write_temperature_compensation_(const TemperatureCompensation &compensation);
 
-  uint32_t seconds_since_last_store_;
+  uint16_t voc_baseline_state_[4]{0};
+  uint32_t voc_baseline_time_;
   uint16_t firmware_version_;
   ERRORCODE error_code_;
   uint8_t serial_number_[4];
@@ -132,7 +126,6 @@ class SEN5XComponent : public PollingComponent, public sensirion_common::Sensiri
   optional<TemperatureCompensation> temperature_compensation_;
   ESPPreferenceObject pref_;
   std::string product_name_;
-  Sen5xBaselines voc_baselines_storage_;
 };
 
 }  // namespace sen5x
