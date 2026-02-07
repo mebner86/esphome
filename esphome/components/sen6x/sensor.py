@@ -249,7 +249,6 @@ CONFIG_SCHEMA = (
                         CONF_NORMALIZED_OFFSET_SLOPE, default=0
                     ): cv.float_range(-3.2768, 3.2767),
                     cv.Optional(CONF_TIME_CONSTANT, default=0): cv.int_range(0, 65535),
-                    cv.Optional(CONF_SLOT): cv.int_range(0, 4),
                 }
             ),
             cv.Optional(CONF_TEMPERATURE_ACCELERATION): cv.Schema(
@@ -277,12 +276,6 @@ SENSOR_MAP = {
     CONF_NOX: "set_nox_sensor",
     CONF_CO2: "set_co2_sensor",
     CONF_FORMALDEHYDE: "set_hcho_sensor",
-}
-
-CO2_SETTING_MAP = {
-    CONF_AMBIENT_PRESSURE_COMPENSATION: "set_ambient_pressure",
-    CONF_AUTOMATIC_SELF_CALIBRATION: "set_co2_automatic_self_calibration",
-    CONF_ALTITUDE_COMPENSATION: "set_sensor_altitude",
 }
 
 
@@ -333,7 +326,11 @@ async def to_code(config):
             )
         )
     if cfg := config.get(CONF_CO2):
-        for key, funcName in CO2_SETTING_MAP.items():
+        for key, funcName in {
+            CONF_AMBIENT_PRESSURE_COMPENSATION: "set_ambient_pressure",
+            CONF_AUTOMATIC_SELF_CALIBRATION: "set_co2_automatic_self_calibration",
+            CONF_ALTITUDE_COMPENSATION: "set_sensor_altitude",
+        }.items():
             if setting := cfg.get(key):
                 cg.add(getattr(var, funcName)(setting))
         if source := cfg.get(CONF_AMBIENT_PRESSURE_COMPENSATION_SOURCE):
