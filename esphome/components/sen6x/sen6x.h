@@ -54,6 +54,17 @@ struct TemperatureAcceleration {
 };
 
 class SEN6XComponent : public PollingComponent, public sensirion_common::SensirionI2CDevice {
+  SUB_SENSOR(pm_1_0)
+  SUB_SENSOR(pm_2_5)
+  SUB_SENSOR(pm_4_0)
+  SUB_SENSOR(pm_10_0)
+  SUB_SENSOR(temperature)
+  SUB_SENSOR(humidity)
+  SUB_SENSOR(voc)
+  SUB_SENSOR(nox)
+  SUB_SENSOR(co2)
+  SUB_SENSOR(hcho)
+
  public:
   float get_setup_priority() const override { return setup_priority::DATA; }
   void setup() override;
@@ -62,17 +73,6 @@ class SEN6XComponent : public PollingComponent, public sensirion_common::Sensiri
 
   enum Sen6xType { SEN62, SEN63C, SEN65, SEN66, SEN68, SEN69C, UNKNOWN };
 
-  void set_pm_1_0_sensor(sensor::Sensor *pm_1_0) { pm_1_0_sensor_ = pm_1_0; }
-  void set_pm_2_5_sensor(sensor::Sensor *pm_2_5) { pm_2_5_sensor_ = pm_2_5; }
-  void set_pm_4_0_sensor(sensor::Sensor *pm_4_0) { pm_4_0_sensor_ = pm_4_0; }
-  void set_pm_10_0_sensor(sensor::Sensor *pm_10_0) { pm_10_0_sensor_ = pm_10_0; }
-
-  void set_voc_sensor(sensor::Sensor *voc_sensor) { voc_sensor_ = voc_sensor; }
-  void set_nox_sensor(sensor::Sensor *nox_sensor) { nox_sensor_ = nox_sensor; }
-  void set_hcho_sensor(sensor::Sensor *hcho_sensor) { hcho_sensor_ = hcho_sensor; }
-  void set_humidity_sensor(sensor::Sensor *humidity_sensor) { humidity_sensor_ = humidity_sensor; }
-  void set_temperature_sensor(sensor::Sensor *temperature_sensor) { temperature_sensor_ = temperature_sensor; }
-  void set_co2_sensor(sensor::Sensor *co2) { co2_sensor_ = co2; }
   void set_ambient_pressure(uint16_t ambient_pressure) { ambient_pressure_ = ambient_pressure; }
   void set_ambient_pressure_source(sensor::Sensor *pressure) { ambient_pressure_source_ = pressure; }
   void set_sensor_altitude(uint16_t sensor_altitude) { sensor_altitude_ = sensor_altitude; }
@@ -153,18 +153,6 @@ class SEN6XComponent : public PollingComponent, public sensirion_common::Sensiri
 
   ERRORCODE error_code_;
   bool initialized_{false};
-  sensor::Sensor *pm_1_0_sensor_{nullptr};
-  sensor::Sensor *pm_2_5_sensor_{nullptr};
-  sensor::Sensor *pm_4_0_sensor_{nullptr};
-  sensor::Sensor *pm_10_0_sensor_{nullptr};
-  // SEN54 and SEN55 only
-  sensor::Sensor *temperature_sensor_{nullptr};
-  sensor::Sensor *humidity_sensor_{nullptr};
-  sensor::Sensor *voc_sensor_{nullptr};
-  // SEN55 only
-  sensor::Sensor *nox_sensor_{nullptr};
-  sensor::Sensor *hcho_sensor_{nullptr};
-  sensor::Sensor *co2_sensor_{nullptr};
   sensor::Sensor *ambient_pressure_source_{nullptr};
   std::string product_name_;
   Sen6xType sen6x_type_{UNKNOWN};
