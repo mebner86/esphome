@@ -283,27 +283,6 @@ void SEN6XComponent::schedule_post_setup_commands_() {
 bool SEN6XComponent::is_measurement_running() const { return this->measurement_started_; }
 
 void SEN6XComponent::finish_setup_() {
-  const bool supports_co2 = this->sen6x_type_ == SEN63C || this->sen6x_type_ == SEN66 ||
-
-                            this->sen6x_type_ == SEN69C;
-  if (supports_co2) {
-    uint16_t ambient_pressure = 0;
-    if (this->get_register(SEN6X_CMD_AMBIENT_PRESSURE, ambient_pressure, 20)) {
-      if (ambient_pressure != 0xFFFF) {
-        this->ambient_pressure_read_ = ambient_pressure;
-      }
-    }
-    uint16_t sensor_altitude = 0;
-    if (this->get_register(SEN6X_CMD_SENSOR_ALTITUDE, sensor_altitude, 20)) {
-      if (sensor_altitude != 0xFFFF)
-        this->sensor_altitude_read_ = sensor_altitude;
-    }
-    uint16_t asc_raw = 0;
-    if (this->get_register(SEN6X_CMD_CO2_SENSOR_AUTOMATIC_SELF_CAL, asc_raw, 20)) {
-      this->co2_asc_read_ = (asc_raw & 0x00FF) != 0;
-    }
-  }
-
   if (!this->write_command(SEN6X_CMD_START_MEASUREMENTS)) {
     ESP_LOGE(TAG, "Error starting continuous measurements.");
 
@@ -355,21 +334,11 @@ void SEN6XComponent::dump_config() {
   } else if (this->ambient_pressure_.has_value()) {
     ESP_LOGCONFIG(TAG, "  Ambient pressure: %u hPa", this->ambient_pressure_.value());
   }
-  if (this->ambient_pressure_read_.has_value()) {
-    ESP_LOGCONFIG(TAG, "  Ambient pressure (device): %u hPa", this->ambient_pressure_read_.value());
-  }
   if (this->sensor_altitude_.has_value()) {
     ESP_LOGCONFIG(TAG, "  Sensor altitude: %u m", this->sensor_altitude_.value());
   }
-  if (this->sensor_altitude_read_.has_value()) {
-    ESP_LOGCONFIG(TAG, "  Sensor altitude (device): %u m", this->sensor_altitude_read_.value());
-  }
   if (this->co2_asc_.has_value()) {
     ESP_LOGCONFIG(TAG, "  CO2 automatic self-calibration: %s", this->co2_asc_.value() ? "enabled" : "disabled");
-  }
-  if (this->co2_asc_read_.has_value()) {
-    ESP_LOGCONFIG(TAG, "  CO2 automatic self-calibration (device): %s",
-                  this->co2_asc_read_.value() ? "enabled" : "disabled");
   }
 
   if (this->temperature_compensation_.has_value()) {

@@ -171,9 +171,6 @@ class SEN6XComponent : public PollingComponent, public sensirion_common::Sensiri
   optional<uint16_t> ambient_pressure_;
   optional<uint16_t> sensor_altitude_;
   optional<bool> co2_asc_;
-  optional<uint16_t> ambient_pressure_read_;
-  optional<uint16_t> sensor_altitude_read_;
-  optional<bool> co2_asc_read_;
   optional<bool> auto_cleaning_enabled_;
   optional<uint32_t> auto_cleaning_interval_s_;
   bool measurement_started_{false};
