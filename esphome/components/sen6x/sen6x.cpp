@@ -118,8 +118,7 @@ void SEN6XComponent::setup() {
       }
       this->serial_number_.clear();
       this->serial_number_.reserve(32);
-      for (uint8_t i = 0; i < 16; i++) {
-        const uint16_t word = raw_serial_number[i];
+      for (const uint16_t word : raw_serial_number) {
         const char c1 = static_cast<char>(word >> 8);
         const char c2 = static_cast<char>(word & 0xFF);
         if (c1 == '\0')
@@ -188,22 +187,26 @@ void SEN6XComponent::setup() {
       ESP_LOGD(TAG, "Firmware version %u.%u", this->firmware_version_major_, this->firmware_version_minor_);
 
       if (this->voc_sensor_ && this->store_baseline_) {
-        // Hash with compilation time and serial number
-        // This ensures the baseline storage is cleared after OTA
-        // Serial numbers are unique to each sensor, so mulitple sensors can be used without conflict
-        char build_time[App.BUILD_TIME_STR_SIZE] = {0};
-
-        App.get_build_time_string(build_time);
-        uint32_t hash = fnv1_hash(std::string(build_time) + this->serial_number_);
+        // Use a stable hash based only on serial number to avoid NVS accumulation
+        // Config version is stored inside the struct to detect when to invalidate
+        uint32_t hash = fnv1a_hash_extend(fnv1a_hash("sen6x_voc_baseline"), this->serial_number_.c_str());
         this->pref_ = global_preferences->make_preference<Sen6xBaselines>(hash, true);
 
+        uint32_t current_config_hash = App.get_config_version_hash();
         if (this->pref_.load(&this->voc_baselines_storage_)) {
-          ESP_LOGI(TAG, "Loaded VOC baseline state0: 0x%04" PRIX32 ", state1: 0x%04" PRIX32,
-                   this->voc_baselines_storage_.state0, this->voc_baselines_storage_.state1);
+          if (this->voc_baselines_storage_.config_hash != current_config_hash) {
+            // Config or ESPHome version changed - discard old baseline
+            ESP_LOGI(TAG, "Config changed, discarding old VOC baseline");
+            this->voc_baselines_storage_ = {};
+          } else {
+            ESP_LOGI(TAG, "Loaded VOC baseline state0: 0x%04" PRIX32 ", state1: 0x%04" PRIX32,
+                     this->voc_baselines_storage_.state0, this->voc_baselines_storage_.state1);
+          }
         }
+        this->voc_baselines_storage_.config_hash = current_config_hash;
 
-        // Initialize storage
-        this->seconds_since_last_store_ = 0;
+        // Initialize baseline store timestamp
+        this->last_baseline_store_ms_ = millis();
 
         if (this->voc_baselines_storage_.state0 > 0 && this->voc_baselines_storage_.state1 > 0) {
           ESP_LOGI(TAG, "Setting VOC baseline from save state0: 0x%04" PRIX32 ", state1: 0x%04" PRIX32,
@@ -300,9 +303,9 @@ void SEN6XComponent::finish_setup_() {
   if (supports_co2) {
     uint16_t ambient_pressure = 0;
     if (this->get_register(SEN6X_CMD_AMBIENT_PRESSURE, ambient_pressure, 20)) {
-      if (ambient_pressure != 0xFFFF)
-
+      if (ambient_pressure != 0xFFFF) {
         this->ambient_pressure_read_ = ambient_pressure;
+      }
     }
     uint16_t sensor_altitude = 0;
     if (this->get_register(SEN6X_CMD_SENSOR_ALTITUDE, sensor_altitude, 20)) {
@@ -466,7 +469,7 @@ void SEN6XComponent::update() {
   }
   // Store baselines after defined interval or if the difference between current and stored baseline becomes too
   // much
-  if (this->store_baseline_ && this->seconds_since_last_store_ > SHORTEST_BASELINE_STORE_INTERVAL) {
+  if (this->store_baseline_ && (millis() - this->last_baseline_store_ms_) > SHORTEST_BASELINE_STORE_INTERVAL_MS) {
     if (this->write_command(SEN6X_CMD_VOC_ALGORITHM_STATE)) {
       // run it a bit later to avoid adding a delay here
       this->set_timeout(550, [this]() {
@@ -478,7 +481,7 @@ void SEN6XComponent::update() {
                   MAXIMUM_STORAGE_DIFF ||
               (uint32_t) std::abs(static_cast<int32_t>(this->voc_baselines_storage_.state1 - state1)) >
                   MAXIMUM_STORAGE_DIFF) {
-            this->seconds_since_last_store_ = 0;
+            this->last_baseline_store_ms_ = millis();
             this->voc_baselines_storage_.state0 = state0;
             this->voc_baselines_storage_.state1 = state1;
 
@@ -500,7 +503,7 @@ void SEN6XComponent::update() {
 
   const uint8_t poll_retries = 24;
   auto poll_ready = std::make_shared<std::function<void(uint8_t)>>();
-  *poll_ready = [this, poll_ready, poll_retries, read_cmd, read_words](uint8_t retries_left) {
+  *poll_ready = [this, poll_ready, read_cmd, read_words](uint8_t retries_left) {
     const uint8_t attempt = static_cast<uint8_t>(poll_retries - retries_left + 1);
     ESP_LOGV(TAG, "Data ready polling attempt %u", attempt);
     uint16_t raw_read_status;
@@ -516,7 +519,7 @@ void SEN6XComponent::update() {
         ESP_LOGD(TAG, "data not ready in time");
         return;
       }
-      this->set_timeout(50, [this, poll_ready, retries_left]() { (*poll_ready)(retries_left - 1); });
+      this->set_timeout(50, [poll_ready, retries_left]() { (*poll_ready)(retries_left - 1); });
       return;
     }
 
@@ -719,7 +722,7 @@ bool SEN6XComponent::write_tuning_parameters_(uint16_t i2c_command, const GasTun
   params[5] = tuning.gain_factor;
   auto result = this->write_command(i2c_command, params, 6);
   if (!result) {
-    ESP_LOGE(TAG, "Set tuning parameters failed (command=%0xX, err=%d)", i2c_command, this->last_error_);
+    ESP_LOGE(TAG, "Set tuning parameters failed (command=0x%04X, err=%d)", i2c_command, this->last_error_);
   }
   return result;
 }
@@ -829,7 +832,7 @@ bool SEN6XComponent::co2_sensor_factory_reset() {
     ESP_LOGE(TAG, "write error CO2 sensor factory reset (%d)", this->last_error_);
     return false;
   }
-  this->set_timeout(1400, [this]() { ESP_LOGD(TAG, "CO2 sensor factory reset complete"); });
+  this->set_timeout(1400, []() { ESP_LOGD(TAG, "CO2 sensor factory reset complete"); });
   return true;
 }
 
@@ -845,7 +848,7 @@ bool SEN6XComponent::reset_device() {
     ESP_LOGE(TAG, "write error device reset (%d)", this->last_error_);
     return false;
   }
-  this->set_timeout(1200, [this]() { ESP_LOGD(TAG, "Reset complete"); });
+  this->set_timeout(1200, []() { ESP_LOGD(TAG, "Reset complete"); });
   return true;
 }
 
@@ -896,7 +899,7 @@ bool SEN6XComponent::activate_sht_heater() {
     ESP_LOGE(TAG, "write error SHT heater activate (%d)", this->last_error_);
     return false;
   }
-  this->set_timeout(20, [this]() { ESP_LOGD(TAG, "SHT heater activated"); });
+  this->set_timeout(20, []() { ESP_LOGD(TAG, "SHT heater activated"); });
   return true;
 }
 
@@ -907,8 +910,6 @@ bool SEN6XComponent::get_sht_heater_measurements() {
       min_fw = 6;
       break;
     case SEN63C:
-      min_fw = 5;
-      break;
     case SEN65:
       min_fw = 5;
       break;

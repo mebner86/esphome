@@ -8,6 +8,7 @@ from esphome.const import (
     CONF_ALTITUDE_COMPENSATION,
     CONF_AMBIENT_PRESSURE_COMPENSATION,
     CONF_AMBIENT_PRESSURE_COMPENSATION_SOURCE,
+    CONF_AUTOMATIC_SELF_CALIBRATION,
     CONF_CO2,
     CONF_FORMALDEHYDE,
     CONF_GAIN_FACTOR,
@@ -15,6 +16,7 @@ from esphome.const import (
     CONF_HUMIDITY,
     CONF_ID,
     CONF_INDEX_OFFSET,
+    CONF_INTERVAL,
     CONF_LEARNING_TIME_GAIN_HOURS,
     CONF_LEARNING_TIME_OFFSET_HOURS,
     CONF_NORMALIZED_OFFSET_SLOPE,
@@ -24,6 +26,7 @@ from esphome.const import (
     CONF_PM_2_5,
     CONF_PM_4_0,
     CONF_PM_10_0,
+    CONF_STARTUP_DELAY,
     CONF_STD_INITIAL,
     CONF_STORE_BASELINE,
     CONF_TEMPERATURE,
@@ -50,7 +53,7 @@ from esphome.const import (
     UNIT_PERCENT,
 )
 
-CODEOWNERS = ["@martgras"]
+CODEOWNERS = ["@martgras", "@mebner86", "@mikelawrence", "@tuct"]
 DEPENDENCIES = ["i2c"]
 AUTO_LOAD = ["sensirion_common"]
 
@@ -61,15 +64,9 @@ SEN6XComponent = sen6x_ns.class_(
 
 CONF_SLOT = "slot"
 
-# Additional configuration constants needed for GitHub version
+# Local configuration constants not in esphome.const
 CONF_ENABLED = "enabled"
-CONF_INTERVAL = "interval"
-CONF_AMBIENT_PRESSURE = "ambient_pressure"
-CONF_AUTOMATIC_SELF_CALIBRATION = "automatic_self_calibration"
-CONF_STARTUP_DELAY = "startup_delay"
 CONF_AUTO_CLEANING = "auto_cleaning"
-CONF_HCHO = "hcho"
-CONF_VOC_BASELINE = "voc_baseline"
 CONF_TEMPERATURE_ACCELERATION = "temperature_acceleration"
 CONF_K = "k"
 CONF_P = "p"
@@ -209,7 +206,7 @@ CONFIG_SCHEMA = (
                     }
                 )
             ),
-            cv.Optional(CONF_HCHO): sensor.sensor_schema(
+            cv.Optional(CONF_FORMALDEHYDE): sensor.sensor_schema(
                 unit_of_measurement="ppb",
                 accuracy_decimals=0,
                 state_class=STATE_CLASS_MEASUREMENT,
@@ -325,17 +322,19 @@ async def to_code(config):
                 cfg.get(CONF_SLOT, 0),
             )
         )
-    if cfg := config.get(CONF_CO2):
-        for key, funcName in {
-            CONF_AMBIENT_PRESSURE_COMPENSATION: "set_ambient_pressure",
-            CONF_AUTOMATIC_SELF_CALIBRATION: "set_co2_automatic_self_calibration",
-            CONF_ALTITUDE_COMPENSATION: "set_sensor_altitude",
-        }.items():
-            if setting := cfg.get(key):
-                cg.add(getattr(var, funcName)(setting))
-        if source := cfg.get(CONF_AMBIENT_PRESSURE_COMPENSATION_SOURCE):
-            sens = await cg.get_variable(source)
-            cg.add(var.set_ambient_pressure_source(sens))
+    if CONF_AMBIENT_PRESSURE_COMPENSATION in config:
+        cg.add(var.set_ambient_pressure(config[CONF_AMBIENT_PRESSURE_COMPENSATION]))
+    if CONF_ALTITUDE_COMPENSATION in config:
+        cg.add(var.set_sensor_altitude(config[CONF_ALTITUDE_COMPENSATION]))
+    if CONF_AUTOMATIC_SELF_CALIBRATION in config:
+        cg.add(
+            var.set_co2_automatic_self_calibration(
+                config[CONF_AUTOMATIC_SELF_CALIBRATION]
+            )
+        )
+    if CONF_AMBIENT_PRESSURE_COMPENSATION_SOURCE in config:
+        sens = await cg.get_variable(config[CONF_AMBIENT_PRESSURE_COMPENSATION_SOURCE])
+        cg.add(var.set_ambient_pressure_source(sens))
 
 
 SEN6X_ACTION_SCHEMA = maybe_simple_id(
@@ -364,9 +363,27 @@ SEN6X_TEMPERATURE_COMPENSATION_ACTION_SCHEMA = cv.Schema(
 @automation.register_action(
     "sen6x.start_fan_autoclean", StartFanAction, SEN6X_ACTION_SCHEMA
 )
-async def sen6x_fan_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, template_arg, paren)
+@automation.register_action(
+    "sen6x.co2_sensor_factory_reset", CO2SensorFactoryResetAction, SEN6X_ACTION_SCHEMA
+)
+@automation.register_action(
+    "sen6x.activate_sht_heater", ActivateSHTHeaterAction, SEN6X_ACTION_SCHEMA
+)
+@automation.register_action(
+    "sen6x.get_sht_heater_measurements",
+    GetSHTHeaterMeasurementsAction,
+    SEN6X_ACTION_SCHEMA,
+)
+@automation.register_action(
+    "sen6x.start_measurement", StartMeasurementAction, SEN6X_ACTION_SCHEMA
+)
+@automation.register_action(
+    "sen6x.stop_measurement", StopMeasurementAction, SEN6X_ACTION_SCHEMA
+)
+async def sen6x_simple_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
 
 
 @automation.register_action(
@@ -377,8 +394,8 @@ async def sen6x_fan_to_code(config, action_id, template_arg, args):
 async def sen6x_set_temperature_compensation_to_code(
     config, action_id, template_arg, args
 ):
-    paren = await cg.get_variable(config[CONF_ID])
-    var = cg.new_Pvariable(action_id, template_arg, paren)
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
     offset = await cg.templatable(config[CONF_OFFSET], args, cg.float_)
     slope = await cg.templatable(config[CONF_NORMALIZED_OFFSET_SLOPE], args, cg.float_)
     time_constant = await cg.templatable(config[CONF_TIME_CONSTANT], args, cg.uint16)
@@ -404,50 +421,8 @@ SEN6X_FRC_ACTION_SCHEMA = cv.Schema(
     SEN6X_FRC_ACTION_SCHEMA,
 )
 async def sen6x_frc_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    var = cg.new_Pvariable(action_id, template_arg, paren)
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
     templ = await cg.templatable(config[CONF_REFERENCE_CO2], args, cg.uint16)
     cg.add(var.set_reference(templ))
     return var
-
-
-@automation.register_action(
-    "sen6x.co2_sensor_factory_reset", CO2SensorFactoryResetAction, SEN6X_ACTION_SCHEMA
-)
-async def sen6x_co2_reset_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, template_arg, paren)
-
-
-@automation.register_action(
-    "sen6x.activate_sht_heater", ActivateSHTHeaterAction, SEN6X_ACTION_SCHEMA
-)
-async def sen6x_sht_heater_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, template_arg, paren)
-
-
-@automation.register_action(
-    "sen6x.get_sht_heater_measurements",
-    GetSHTHeaterMeasurementsAction,
-    SEN6X_ACTION_SCHEMA,
-)
-async def sen6x_sht_heater_measurements_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, template_arg, paren)
-
-
-@automation.register_action(
-    "sen6x.start_measurement", StartMeasurementAction, SEN6X_ACTION_SCHEMA
-)
-async def sen6x_start_measurement_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, template_arg, paren)
-
-
-@automation.register_action(
-    "sen6x.stop_measurement", StopMeasurementAction, SEN6X_ACTION_SCHEMA
-)
-async def sen6x_stop_measurement_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, template_arg, paren)
