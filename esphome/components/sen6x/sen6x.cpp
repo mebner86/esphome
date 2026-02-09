@@ -109,107 +109,125 @@ void SEN6XComponent::setup() {
     }
 
     this->set_timeout(20, [this]() {
-      uint16_t raw_serial_number[16];
-      if (!this->get_register(SEN6X_CMD_GET_SERIAL_NUMBER, raw_serial_number, 16, 20)) {
-        ESP_LOGE(TAG, "Failed to read serial number");
+      if (!this->write_command(SEN6X_CMD_GET_SERIAL_NUMBER)) {
         this->error_code_ = SERIAL_NUMBER_IDENTIFICATION_FAILED;
         this->mark_failed();
         return;
       }
-      this->serial_number_.clear();
-      this->serial_number_.reserve(32);
-      for (const uint16_t word : raw_serial_number) {
-        const char c1 = static_cast<char>(word >> 8);
-        const char c2 = static_cast<char>(word & 0xFF);
-        if (c1 == '\0')
-          break;
-        this->serial_number_.push_back(c1);
-        if (c2 == '\0')
-          break;
-        this->serial_number_.push_back(c2);
-      }
-      ESP_LOGD(TAG, "Serial number %s", this->serial_number_.c_str());
-
-      uint16_t raw_product_name[16];
-      if (!this->get_register(SEN6X_CMD_GET_PRODUCT_NAME, raw_product_name, 16, 20)) {
-        ESP_LOGE(TAG, "Failed to read product name");
-        this->error_code_ = PRODUCT_NAME_FAILED;
-        this->mark_failed();
-        return;
-      }
-
-      this->product_name_.clear();
-      // 2 ASCII bytes are encoded in an int
-      const uint16_t *current_int = raw_product_name;
-      char current_char;
-      uint8_t max = 16;
-      do {
-        // first char
-        current_char = *current_int >> 8;
-        if (current_char) {
-          this->product_name_.push_back(current_char);
-          // second char
-          current_char = *current_int & 0xFF;
-          if (current_char)
-            this->product_name_.push_back(current_char);
+      this->set_timeout(20, [this]() {
+        uint16_t raw_serial_number[16];
+        if (!this->read_data(raw_serial_number, 16)) {
+          this->error_code_ = SERIAL_NUMBER_IDENTIFICATION_FAILED;
+          this->mark_failed();
+          return;
         }
-        current_int++;
-      } while (current_char && --max);
+        this->serial_number_.clear();
+        this->serial_number_.reserve(32);
+        for (const uint16_t word : raw_serial_number) {
+          const char c1 = static_cast<char>(word >> 8);
+          const char c2 = static_cast<char>(word & 0xFF);
+          if (c1 == '\0')
+            break;
+          this->serial_number_.push_back(c1);
+          if (c2 == '\0')
+            break;
+          this->serial_number_.push_back(c2);
+        }
+        ESP_LOGD(TAG, "Serial number %s", this->serial_number_.c_str());
 
-      Sen6xType inferred_type = this->infer_type_from_product_name_(this->product_name_);
-      if (this->sen6x_type_ == UNKNOWN) {
-        this->sen6x_type_ = inferred_type;
-        if (inferred_type == UNKNOWN) {
-          ESP_LOGE(TAG, "Unable to infer sensor type from product name '%s'. Please specify 'type' in configuration.",
-                   this->product_name_.c_str());
+        if (!this->write_command(SEN6X_CMD_GET_PRODUCT_NAME)) {
           this->error_code_ = PRODUCT_NAME_FAILED;
           this->mark_failed();
           return;
         }
-        ESP_LOGD(TAG, "Sensor type inferred from product name: %s", this->product_name_.c_str());
-      } else if (this->sen6x_type_ != inferred_type && inferred_type != UNKNOWN) {
-        ESP_LOGW(TAG,
-                 "Configured sensor type does not match product name '%s'. "
-                 "Using configured type, but this may cause issues.",
-                 this->product_name_.c_str());
-      }
-      ESP_LOGD(TAG, "Product name: %s", this->product_name_.c_str());
-
-      uint16_t raw_firmware_version = 0;
-      if (!this->get_register(SEN6X_CMD_GET_FIRMWARE_VERSION, raw_firmware_version, 20)) {
-        ESP_LOGE(TAG, "Failed to read firmware version");
-        this->error_code_ = FIRMWARE_FAILED;
-        this->mark_failed();
-        return;
-      }
-      this->firmware_version_major_ = (raw_firmware_version >> 8) & 0xFF;
-      this->firmware_version_minor_ = raw_firmware_version & 0xFF;
-      ESP_LOGD(TAG, "Firmware version %u.%u", this->firmware_version_major_, this->firmware_version_minor_);
-
-      if (this->voc_sensor_ && this->store_baseline_) {
-        // Use a stable hash based only on serial number to avoid NVS accumulation
-        // Config version is stored inside the struct to detect when to invalidate
-        uint32_t hash = fnv1a_hash_extend(fnv1a_hash("sen6x_voc_baseline"), this->serial_number_.c_str());
-        this->pref_ = global_preferences->make_preference<Sen6xVocBaseline>(hash, true);
-        this->voc_baseline_time_ = App.get_loop_component_start_time();
-
-        uint32_t current_config_hash = App.get_config_version_hash();
-        if (this->pref_.load(&this->voc_baselines_storage_)) {
-          if (this->voc_baselines_storage_.config_hash != current_config_hash) {
-            ESP_LOGI(TAG, "Config changed, discarding old VOC baseline");
-            this->voc_baselines_storage_ = {};
+        this->set_timeout(20, [this]() {
+          uint16_t raw_product_name[16];
+          if (!this->read_data(raw_product_name, 16)) {
+            ESP_LOGE(TAG, "Failed to read product name");
+            this->error_code_ = PRODUCT_NAME_FAILED;
+            this->mark_failed();
+            return;
           }
-        }
-        this->voc_baselines_storage_.config_hash = current_config_hash;
+          this->product_name_.clear();
+          // 2 ASCII bytes are encoded in an int
+          const uint16_t *current_int = raw_product_name;
+          char current_char;
+          uint8_t max = 16;
+          do {
+            // first char
+            current_char = *current_int >> 8;
+            if (current_char) {
+              this->product_name_.push_back(current_char);
+              // second char
+              current_char = *current_int & 0xFF;
+              if (current_char)
+                this->product_name_.push_back(current_char);
+            }
+            current_int++;
+          } while (current_char && --max);
 
-        if (!this->write_command(SEN6X_CMD_VOC_ALGORITHM_STATE, this->voc_baselines_storage_.state, 4)) {
-          ESP_LOGE(TAG, "VOC Baseline State write to sensor failed");
-        } else {
-          ESP_LOGV(TAG, "VOC Baseline State loaded");
-          delay(20);
-        }
-      }
-      this->schedule_post_setup_commands_();
+          Sen6xType inferred_type = this->infer_type_from_product_name_(this->product_name_);
+          if (this->sen6x_type_ == UNKNOWN) {
+            this->sen6x_type_ = inferred_type;
+            if (inferred_type == UNKNOWN) {
+              ESP_LOGE(TAG,
+                       "Unable to infer sensor type from product name '%s'. Please specify 'type' in configuration.",
+                       this->product_name_.c_str());
+              this->error_code_ = PRODUCT_NAME_FAILED;
+              this->mark_failed();
+              return;
+            }
+            ESP_LOGD(TAG, "Sensor type inferred from product name: %s", this->product_name_.c_str());
+          } else if (this->sen6x_type_ != inferred_type && inferred_type != UNKNOWN) {
+            ESP_LOGW(TAG,
+                     "Configured sensor type does not match product name '%s'. "
+                     "Using configured type, but this may cause issues.",
+                     this->product_name_.c_str());
+          }
+          ESP_LOGD(TAG, "Product name: %s", this->product_name_.c_str());
+
+          if (!this->write_command(SEN6X_CMD_GET_FIRMWARE_VERSION)) {
+            ESP_LOGE(TAG, ESP_LOG_MSG_COMM_FAIL);
+            this->mark_failed();
+            return;
+          }
+          this->set_timeout(20, [this]() {
+            uint16_t raw_firmware_version = 0;
+            if (!this->read_data(&raw_firmware_version, 1)) {
+              this->error_code_ = FIRMWARE_FAILED;
+              this->mark_failed();
+              return;
+            }
+            this->firmware_version_major_ = (raw_firmware_version >> 8) & 0xFF;
+            this->firmware_version_minor_ = raw_firmware_version & 0xFF;
+            ESP_LOGD(TAG, "Firmware version %u.%u", this->firmware_version_major_, this->firmware_version_minor_);
+
+            if (this->voc_sensor_ && this->store_baseline_) {
+              // Use a stable hash based only on serial number to avoid NVS accumulation
+              // Config version is stored inside the struct to detect when to invalidate
+              uint32_t hash = fnv1a_hash_extend(fnv1a_hash("sen6x_voc_baseline"), this->serial_number_.c_str());
+              this->pref_ = global_preferences->make_preference<Sen6xVocBaseline>(hash, true);
+              this->voc_baseline_time_ = App.get_loop_component_start_time();
+
+              uint32_t current_config_hash = App.get_config_version_hash();
+              if (this->pref_.load(&this->voc_baselines_storage_)) {
+                if (this->voc_baselines_storage_.config_hash != current_config_hash) {
+                  ESP_LOGI(TAG, "Config changed, discarding old VOC baseline");
+                  this->voc_baselines_storage_ = {};
+                }
+              }
+              this->voc_baselines_storage_.config_hash = current_config_hash;
+
+              if (!this->write_command(SEN6X_CMD_VOC_ALGORITHM_STATE, this->voc_baselines_storage_.state, 4)) {
+                ESP_LOGE(TAG, "VOC Baseline State write to sensor failed");
+              } else {
+                ESP_LOGV(TAG, "VOC Baseline State loaded");
+              }
+            }
+            this->set_timeout(20, [this]() { this->schedule_post_setup_commands_(); });
+          });
+        });
+      });
     });
   });
 }
