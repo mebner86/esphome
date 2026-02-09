@@ -24,6 +24,7 @@ enum ERRORCODE {
 static constexpr uint32_t SHORTEST_BASELINE_STORE_INTERVAL_MS = 2 * 60 * 60 * 1000UL;
 // Default NOx std_initial value per Sensirion specification
 static constexpr uint16_t NOX_DEFAULT_STD_INITIAL = 50;
+static constexpr int16_t NOX_DEFAULT_LEARNING_TIME_GAIN_HOURS = 12;
 
 struct Sen6xVocBaseline {
   uint16_t state[4];
@@ -102,12 +103,11 @@ class SEN6XComponent : public PollingComponent, public sensirion_common::Sensiri
     this->voc_tuning_params_ = tuning_params;
   }
   void set_nox_algorithm_tuning(uint16_t index_offset, uint16_t learning_time_offset_hours,
-                                uint16_t learning_time_gain_hours, uint16_t gating_max_duration_minutes,
-                                uint16_t gain_factor) {
+                                uint16_t gating_max_duration_minutes, uint16_t gain_factor) {
     GasTuning tuning_params;
     tuning_params.index_offset = index_offset;
     tuning_params.learning_time_offset_hours = learning_time_offset_hours;
-    tuning_params.learning_time_gain_hours = learning_time_gain_hours;
+    tuning_params.learning_time_gain_hours = NOX_DEFAULT_LEARNING_TIME_GAIN_HOURS;
     tuning_params.gating_max_duration_minutes = gating_max_duration_minutes;
     tuning_params.std_initial = NOX_DEFAULT_STD_INITIAL;
     tuning_params.gain_factor = gain_factor;
