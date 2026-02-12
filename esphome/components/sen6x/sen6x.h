@@ -3,13 +3,11 @@
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/sensirion_common/i2c_sensirion.h"
-#include "esphome/core/application.h"
 
 namespace esphome {
 namespace sen6x {
 
 enum ERRORCODE {
-  COMMUNICATION_FAILED,
   SERIAL_NUMBER_IDENTIFICATION_FAILED,
   MEASUREMENT_INIT_FAILED,
   PRODUCT_NAME_FAILED,
@@ -26,24 +24,23 @@ class SEN6XComponent : public PollingComponent, public sensirion_common::Sensiri
 
   enum Sen6xType { SEN62, SEN63C, SEN65, SEN66, SEN68, SEN69C, UNKNOWN };
 
-  void set_pm_1_0_sensor(sensor::Sensor *pm_1_0) { pm_1_0_sensor_ = pm_1_0; }
-  void set_pm_2_5_sensor(sensor::Sensor *pm_2_5) { pm_2_5_sensor_ = pm_2_5; }
-  void set_pm_4_0_sensor(sensor::Sensor *pm_4_0) { pm_4_0_sensor_ = pm_4_0; }
-  void set_pm_10_0_sensor(sensor::Sensor *pm_10_0) { pm_10_0_sensor_ = pm_10_0; }
+  void set_pm_1_0_sensor(sensor::Sensor *pm_1_0) { this->pm_1_0_sensor_ = pm_1_0; }
+  void set_pm_2_5_sensor(sensor::Sensor *pm_2_5) { this->pm_2_5_sensor_ = pm_2_5; }
+  void set_pm_4_0_sensor(sensor::Sensor *pm_4_0) { this->pm_4_0_sensor_ = pm_4_0; }
+  void set_pm_10_0_sensor(sensor::Sensor *pm_10_0) { this->pm_10_0_sensor_ = pm_10_0; }
 
-  void set_voc_sensor(sensor::Sensor *voc_sensor) { voc_sensor_ = voc_sensor; }
-  void set_nox_sensor(sensor::Sensor *nox_sensor) { nox_sensor_ = nox_sensor; }
-  void set_hcho_sensor(sensor::Sensor *hcho_sensor) { hcho_sensor_ = hcho_sensor; }
-  void set_humidity_sensor(sensor::Sensor *humidity_sensor) { humidity_sensor_ = humidity_sensor; }
-  void set_temperature_sensor(sensor::Sensor *temperature_sensor) { temperature_sensor_ = temperature_sensor; }
-  void set_co2_sensor(sensor::Sensor *co2) { co2_sensor_ = co2; }
-  void set_startup_delay(uint32_t delay_ms) { startup_delay_ms_ = delay_ms; }
+  void set_voc_sensor(sensor::Sensor *voc_sensor) { this->voc_sensor_ = voc_sensor; }
+  void set_nox_sensor(sensor::Sensor *nox_sensor) { this->nox_sensor_ = nox_sensor; }
+  void set_hcho_sensor(sensor::Sensor *hcho_sensor) { this->hcho_sensor_ = hcho_sensor; }
+  void set_humidity_sensor(sensor::Sensor *humidity_sensor) { this->humidity_sensor_ = humidity_sensor; }
+  void set_temperature_sensor(sensor::Sensor *temperature_sensor) { this->temperature_sensor_ = temperature_sensor; }
+  void set_co2_sensor(sensor::Sensor *co2) { this->co2_sensor_ = co2; }
+  void set_startup_delay(uint32_t delay_ms) { this->startup_delay_ms_ = delay_ms; }
   bool is_measurement_running() const;
   const std::string &get_product_name() const { return this->product_name_; }
   const std::string &get_serial_number() const { return this->serial_number_; }
   uint8_t get_firmware_version_major() const { return this->firmware_version_major_; }
   uint8_t get_firmware_version_minor() const { return this->firmware_version_minor_; }
-  bool get_state() const { return this->measurement_started_; }
   bool reset_device();
   bool start_measurement();
   bool stop_measurement();
@@ -51,17 +48,15 @@ class SEN6XComponent : public PollingComponent, public sensirion_common::Sensiri
  protected:
   void finish_setup_();
 
-  ERRORCODE error_code_;
+  ERRORCODE error_code_{UNKNOWN};
   bool initialized_{false};
   sensor::Sensor *pm_1_0_sensor_{nullptr};
   sensor::Sensor *pm_2_5_sensor_{nullptr};
   sensor::Sensor *pm_4_0_sensor_{nullptr};
   sensor::Sensor *pm_10_0_sensor_{nullptr};
-  // SEN54 and SEN55 only
   sensor::Sensor *temperature_sensor_{nullptr};
   sensor::Sensor *humidity_sensor_{nullptr};
   sensor::Sensor *voc_sensor_{nullptr};
-  // SEN55 only
   sensor::Sensor *nox_sensor_{nullptr};
   sensor::Sensor *hcho_sensor_{nullptr};
   sensor::Sensor *co2_sensor_{nullptr};

@@ -1,8 +1,7 @@
 #include "sen6x.h"
-#include "esphome/core/hal.h"
+#include "esphome/core/application.h"
 #include "esphome/core/log.h"
 #include <cmath>
-#include <cinttypes>
 
 namespace esphome {
 namespace sen6x {

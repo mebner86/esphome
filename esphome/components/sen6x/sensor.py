@@ -150,10 +150,10 @@ async def to_code(config):
     if CONF_STARTUP_DELAY in config:
         cg.add(var.set_startup_delay(config[CONF_STARTUP_DELAY]))
 
-    for key, funcName in SENSOR_MAP.items():
+    for key, func_name in SENSOR_MAP.items():
         if cfg := config.get(key):
             sens = await sensor.new_sensor(cfg)
-            cg.add(getattr(var, funcName)(sens))
+            cg.add(getattr(var, func_name)(sens))
 
 
 SEN6X_ACTION_SCHEMA = maybe_simple_id(
