@@ -1,10 +1,9 @@
-from esphome import automation
-from esphome.automation import maybe_simple_id
 import esphome.codegen as cg
 from esphome.components import i2c, sensirion_common, sensor
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_CO2,
+    CONF_FORMALDEHYDE,
     CONF_HUMIDITY,
     CONF_ID,
     CONF_NOX,
@@ -13,6 +12,7 @@ from esphome.const import (
     CONF_PM_4_0,
     CONF_PM_10_0,
     CONF_TEMPERATURE,
+    CONF_TYPE,
     CONF_VOC,
     DEVICE_CLASS_AQI,
     DEVICE_CLASS_CARBON_DIOXIDE,
@@ -33,7 +33,7 @@ from esphome.const import (
     UNIT_PERCENT,
 )
 
-CODEOWNERS = ["@martgras"]
+CODEOWNERS = ["@martgras", "@mebner86", "@mikelawrence", "@tuct"]
 DEPENDENCIES = ["i2c"]
 AUTO_LOAD = ["sensirion_common"]
 
@@ -42,18 +42,13 @@ SEN6XComponent = sen6x_ns.class_(
     "SEN6XComponent", cg.PollingComponent, sensirion_common.SensirionI2CDevice
 )
 
-CONF_STARTUP_DELAY = "startup_delay"
-CONF_HCHO = "hcho"
-
-# Actions
-StartMeasurementAction = sen6x_ns.class_("StartMeasurementAction", automation.Action)
-StopMeasurementAction = sen6x_ns.class_("StopMeasurementAction", automation.Action)
-
-
 CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(SEN6XComponent),
+            cv.Optional(CONF_TYPE): cv.one_of(
+                "SEN62", "SEN63C", "SEN65", "SEN66", "SEN68", "SEN69C", upper=True
+            ),
             cv.Optional(CONF_PM_1_0): sensor.sensor_schema(
                 unit_of_measurement=UNIT_MICROGRAMS_PER_CUBIC_METER,
                 icon=ICON_CHEMICAL_WEAPON,
@@ -81,6 +76,20 @@ CONFIG_SCHEMA = (
                 device_class=DEVICE_CLASS_PM10,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
+            cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
+                unit_of_measurement=UNIT_CELSIUS,
+                icon=ICON_THERMOMETER,
+                accuracy_decimals=2,
+                device_class=DEVICE_CLASS_TEMPERATURE,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
+            cv.Optional(CONF_HUMIDITY): sensor.sensor_schema(
+                unit_of_measurement=UNIT_PERCENT,
+                icon=ICON_WATER_PERCENT,
+                accuracy_decimals=2,
+                device_class=DEVICE_CLASS_HUMIDITY,
+                state_class=STATE_CLASS_MEASUREMENT,
+            ),
             cv.Optional(CONF_VOC): sensor.sensor_schema(
                 icon=ICON_RADIATOR,
                 accuracy_decimals=0,
@@ -100,26 +109,10 @@ CONFIG_SCHEMA = (
                 device_class=DEVICE_CLASS_CARBON_DIOXIDE,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
-            cv.Optional(CONF_HCHO): sensor.sensor_schema(
+            cv.Optional(CONF_FORMALDEHYDE): sensor.sensor_schema(
                 unit_of_measurement="ppb",
+                icon=ICON_RADIATOR,
                 accuracy_decimals=0,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
-            cv.Optional(
-                CONF_STARTUP_DELAY, default="60s"
-            ): cv.positive_time_period_milliseconds,
-            cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
-                unit_of_measurement=UNIT_CELSIUS,
-                icon=ICON_THERMOMETER,
-                accuracy_decimals=2,
-                device_class=DEVICE_CLASS_TEMPERATURE,
-                state_class=STATE_CLASS_MEASUREMENT,
-            ),
-            cv.Optional(CONF_HUMIDITY): sensor.sensor_schema(
-                unit_of_measurement=UNIT_PERCENT,
-                icon=ICON_WATER_PERCENT,
-                accuracy_decimals=2,
-                device_class=DEVICE_CLASS_HUMIDITY,
                 state_class=STATE_CLASS_MEASUREMENT,
             ),
         }
@@ -138,7 +131,7 @@ SENSOR_MAP = {
     CONF_VOC: "set_voc_sensor",
     CONF_NOX: "set_nox_sensor",
     CONF_CO2: "set_co2_sensor",
-    CONF_HCHO: "set_hcho_sensor",
+    CONF_FORMALDEHYDE: "set_hcho_sensor",
 }
 
 
@@ -147,33 +140,10 @@ async def to_code(config):
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
 
-    if CONF_STARTUP_DELAY in config:
-        cg.add(var.set_startup_delay(config[CONF_STARTUP_DELAY]))
+    if CONF_TYPE in config:
+        cg.add(var.set_type(config[CONF_TYPE]))
 
     for key, func_name in SENSOR_MAP.items():
         if cfg := config.get(key):
             sens = await sensor.new_sensor(cfg)
             cg.add(getattr(var, func_name)(sens))
-
-
-SEN6X_ACTION_SCHEMA = maybe_simple_id(
-    {
-        cv.Required(CONF_ID): cv.use_id(SEN6XComponent),
-    }
-)
-
-
-@automation.register_action(
-    "sen6x.start_measurement", StartMeasurementAction, SEN6X_ACTION_SCHEMA
-)
-async def sen6x_start_measurement_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, template_arg, paren)
-
-
-@automation.register_action(
-    "sen6x.stop_measurement", StopMeasurementAction, SEN6X_ACTION_SCHEMA
-)
-async def sen6x_stop_measurement_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, template_arg, paren)

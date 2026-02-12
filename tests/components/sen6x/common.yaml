@@ -1,6 +1,8 @@
 sensor:
+  # Test with explicit type parameter
   - platform: sen6x
     id: sen6x_sensor
+    type: SEN69C
     i2c_id: i2c_bus
     temperature:
       name: Temperature
@@ -30,6 +32,6 @@ sensor:
       name: VOC
     co2:
       name: Carbon Dioxide
-    hcho:
+    formaldehyde:
       name: Formaldehyde
     address: 0x6B

@@ -1,10 +1,12 @@
 #include "sen6x.h"
-#include "esphome/core/application.h"
+#include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include <cmath>
+#include <cinttypes>
+#include <functional>
+#include <memory>
 
-namespace esphome {
-namespace sen6x {
+namespace esphome::sen6x {
 
 static const char *const TAG = "sen6x";
 
@@ -21,7 +23,6 @@ static const uint16_t SEN6X_CMD_READ_MEASUREMENT_SEN68 = 0x0467;
 static const uint16_t SEN6X_CMD_READ_MEASUREMENT_SEN69C = 0x04B5;
 
 static const uint16_t SEN6X_CMD_START_MEASUREMENTS = 0x0021;
-static const uint16_t SEN6X_CMD_STOP_MEASUREMENTS = 0x0104;
 static const uint16_t SEN6X_CMD_RESET = 0xD304;
 
 static inline void set_read_command_and_words(SEN6XComponent::Sen6xType type, uint16_t &read_cmd, uint8_t &read_words) {
@@ -62,32 +63,15 @@ void SEN6XComponent::setup() {
 
   // the sensor needs 100 ms to enter the idle state
   this->set_timeout(100, [this]() {
-    // Check if measurement is ready before reading the value
-    if (!this->write_command(SEN6X_CMD_GET_DATA_READY_STATUS)) {
-      ESP_LOGE(TAG, "Failed to write data ready status command");
+    // Reset the sensor to ensure a clean state regardless of prior commands or power issues
+    if (!this->write_command(SEN6X_CMD_RESET)) {
+      ESP_LOGE(TAG, "Failed to reset sensor");
       this->mark_failed();
       return;
     }
 
-    uint16_t raw_read_status;
-    if (!this->read_data(raw_read_status)) {
-      ESP_LOGE(TAG, "Failed to read data ready status");
-      this->mark_failed();
-      return;
-    }
-
-    // In order to query the device periodic measurement must be ceased => use reset!
-    if (raw_read_status) {
-      ESP_LOGD(TAG, "Sensor has data available, stopping periodic measurement / reset");
-
-      if (!this->write_command(SEN6X_CMD_STOP_MEASUREMENTS)) {
-        ESP_LOGE(TAG, "Failed to stop measurements");
-        this->mark_failed();
-        return;
-      }
-    }
-
-    this->set_timeout(20, [this]() {
+    // After reset the sensor needs 100 ms to become ready
+    this->set_timeout(100, [this]() {
       uint16_t raw_serial_number[16];
       if (!this->get_register(SEN6X_CMD_GET_SERIAL_NUMBER, raw_serial_number, 16, 20)) {
         ESP_LOGE(TAG, "Failed to read serial number");
@@ -97,8 +81,7 @@ void SEN6XComponent::setup() {
       }
       this->serial_number_.clear();
       this->serial_number_.reserve(32);
-      for (uint8_t i = 0; i < 16; i++) {
-        const uint16_t word = raw_serial_number[i];
+      for (const uint16_t word : raw_serial_number) {
         const char c1 = static_cast<char>(word >> 8);
         const char c2 = static_cast<char>(word & 0xFF);
         if (c1 == '\0')
@@ -119,41 +102,35 @@ void SEN6XComponent::setup() {
       }
 
       this->product_name_.clear();
-      // 2 ASCII bytes are encoded in an int
-      const uint16_t *current_int = raw_product_name;
-      char current_char;
-      uint8_t max = 16;
-      do {
-        // first char
-        current_char = *current_int >> 8;
-        if (current_char) {
-          this->product_name_.push_back(current_char);
-          // second char
-          current_char = *current_int & 0xFF;
-          if (current_char)
-            this->product_name_.push_back(current_char);
-        }
-        current_int++;
-      } while (current_char && --max);
-
-      this->sen6x_type_ = UNKNOWN;
-      if (this->product_name_ == "SEN62") {
-        this->sen6x_type_ = SEN62;
-      } else if (this->product_name_ == "SEN63C") {
-        this->sen6x_type_ = SEN63C;
-      } else if (this->product_name_ == "SEN65") {
-        this->sen6x_type_ = SEN65;
-      } else if (this->product_name_ == "SEN66") {
-        this->sen6x_type_ = SEN66;
-      } else if (this->product_name_ == "SEN68") {
-        this->sen6x_type_ = SEN68;
-      } else if (this->product_name_ == "SEN69C") {
-        this->sen6x_type_ = SEN69C;
-      } else if (this->product_name_ == "") {  // empty name
-        ESP_LOGD(TAG, "Productname empty, falling back to SEN66");
-        this->sen6x_type_ = SEN66;
+      for (const uint16_t word : raw_product_name) {
+        const char c1 = static_cast<char>(word >> 8);
+        const char c2 = static_cast<char>(word & 0xFF);
+        if (c1 == '\0')
+          break;
+        this->product_name_.push_back(c1);
+        if (c2 == '\0')
+          break;
+        this->product_name_.push_back(c2);
       }
-      ESP_LOGD(TAG, "Productname %s", this->product_name_.c_str());
+
+      Sen6xType inferred_type = this->infer_type_from_product_name_(this->product_name_);
+      if (this->sen6x_type_ == UNKNOWN) {
+        this->sen6x_type_ = inferred_type;
+        if (inferred_type == UNKNOWN) {
+          ESP_LOGE(TAG, "Unable to infer sensor type from product name '%s'. Please specify 'type' in configuration.",
+                   this->product_name_.c_str());
+          this->error_code_ = PRODUCT_NAME_FAILED;
+          this->mark_failed();
+          return;
+        }
+        ESP_LOGD(TAG, "Sensor type inferred from product name: %s", this->product_name_.c_str());
+      } else if (this->sen6x_type_ != inferred_type && inferred_type != UNKNOWN) {
+        ESP_LOGW(TAG,
+                 "Configured sensor type does not match product name '%s'. "
+                 "Using configured type, but this may cause issues.",
+                 this->product_name_.c_str());
+      }
+      ESP_LOGD(TAG, "Product name: %s", this->product_name_.c_str());
 
       uint16_t raw_firmware_version = 0;
       if (!this->get_register(SEN6X_CMD_GET_FIRMWARE_VERSION, raw_firmware_version, 20)) {
@@ -166,33 +143,26 @@ void SEN6XComponent::setup() {
       this->firmware_version_minor_ = raw_firmware_version & 0xFF;
       ESP_LOGD(TAG, "Firmware version %u.%u", this->firmware_version_major_, this->firmware_version_minor_);
 
-      this->finish_setup_();
+      if (!this->write_command(SEN6X_CMD_START_MEASUREMENTS)) {
+        ESP_LOGE(TAG, "Error starting continuous measurements.");
+        this->error_code_ = MEASUREMENT_INIT_FAILED;
+        this->mark_failed();
+        return;
+      }
+
+      this->startup_stable_after_ = App.get_loop_component_start_time() + 60000;
+      this->initialized_ = true;
+      ESP_LOGD(TAG, "Sensor initialized");
     });
   });
-}
-
-bool SEN6XComponent::is_measurement_running() const { return this->measurement_started_; }
-
-void SEN6XComponent::finish_setup_() {
-  if (!this->write_command(SEN6X_CMD_START_MEASUREMENTS)) {
-    ESP_LOGE(TAG, "Error starting continuous measurements.");
-
-    this->error_code_ = MEASUREMENT_INIT_FAILED;
-    this->mark_failed();
-    return;
-  }
-
-  const uint32_t now = App.get_loop_component_start_time();
-
-  this->measurement_started_ = true;
-  this->startup_stable_after_ = now + this->startup_delay_ms_;
-  this->initialized_ = true;
-  ESP_LOGD(TAG, "Sensor initialized");
 }
 
 void SEN6XComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "sen6x:");
   LOG_I2C_DEVICE(this);
+  ESP_LOGCONFIG(TAG, "  Product: %s", this->product_name_.c_str());
+  ESP_LOGCONFIG(TAG, "  Serial: %s", this->serial_number_.c_str());
+  ESP_LOGCONFIG(TAG, "  Firmware: %u.%u", this->firmware_version_major_, this->firmware_version_minor_);
 
   if (this->is_failed()) {
     switch (this->error_code_) {
@@ -217,7 +187,6 @@ void SEN6XComponent::dump_config() {
     }
   }
   LOG_UPDATE_INTERVAL(this);
-  ESP_LOGCONFIG(TAG, "  Startup delay: %u ms", this->startup_delay_ms_);
   LOG_SENSOR("  ", "PM  1.0", this->pm_1_0_sensor_);
   LOG_SENSOR("  ", "PM  2.5", this->pm_2_5_sensor_);
   LOG_SENSOR("  ", "PM  4.0", this->pm_4_0_sensor_);
@@ -234,38 +203,6 @@ void SEN6XComponent::update() {
   if (!this->initialized_) {
     return;
   }
-  const uint32_t now = App.get_loop_component_start_time();
-  if (this->last_stop_ms_ != 0 && (now - this->last_stop_ms_) < 1400) {
-    const uint32_t wait_ms = 1400 - (now - this->last_stop_ms_);
-    this->set_timeout(wait_ms, [this]() { this->update(); });
-    return;
-  }
-  if (!this->measurement_started_) {
-    if (this->has_last_values_) {
-      if (this->pm_1_0_sensor_ != nullptr)
-        this->pm_1_0_sensor_->publish_state(this->last_pm_1_0_);
-      if (this->pm_2_5_sensor_ != nullptr)
-        this->pm_2_5_sensor_->publish_state(this->last_pm_2_5_);
-      if (this->pm_4_0_sensor_ != nullptr)
-        this->pm_4_0_sensor_->publish_state(this->last_pm_4_0_);
-      if (this->pm_10_0_sensor_ != nullptr)
-        this->pm_10_0_sensor_->publish_state(this->last_pm_10_0_);
-      if (this->temperature_sensor_ != nullptr)
-        this->temperature_sensor_->publish_state(this->last_temperature_);
-      if (this->humidity_sensor_ != nullptr)
-        this->humidity_sensor_->publish_state(this->last_humidity_);
-      if (this->voc_sensor_ != nullptr)
-        this->voc_sensor_->publish_state(this->last_voc_);
-      if (this->nox_sensor_ != nullptr)
-        this->nox_sensor_->publish_state(this->last_nox_);
-      if (this->hcho_sensor_ != nullptr)
-        this->hcho_sensor_->publish_state(this->last_hcho_);
-      if (this->co2_sensor_ != nullptr)
-        this->co2_sensor_->publish_state(this->last_co2_);
-      this->status_clear_warning();
-    }
-    return;
-  }
 
   uint16_t read_cmd;
   uint8_t read_words;
@@ -273,7 +210,7 @@ void SEN6XComponent::update() {
 
   const uint8_t poll_retries = 24;
   auto poll_ready = std::make_shared<std::function<void(uint8_t)>>();
-  *poll_ready = [this, poll_ready, poll_retries, read_cmd, read_words](uint8_t retries_left) {
+  *poll_ready = [this, poll_ready, read_cmd, read_words](uint8_t retries_left) {
     const uint8_t attempt = static_cast<uint8_t>(poll_retries - retries_left + 1);
     ESP_LOGV(TAG, "Data ready polling attempt %u", attempt);
     uint16_t raw_read_status;
@@ -289,7 +226,7 @@ void SEN6XComponent::update() {
         ESP_LOGD(TAG, "data not ready in time");
         return;
       }
-      this->set_timeout(50, [this, poll_ready, retries_left]() { (*poll_ready)(retries_left - 1); });
+      this->set_timeout(50, [poll_ready, retries_left]() { (*poll_ready)(retries_left - 1); });
       return;
     }
 
@@ -399,25 +336,9 @@ void SEN6XComponent::update() {
         }
       }
 
-      this->last_pm_1_0_ = pm_1_0;
-      this->last_pm_2_5_ = pm_2_5;
-      this->last_pm_4_0_ = pm_4_0;
-      this->last_pm_10_0_ = pm_10_0;
-      this->last_temperature_ = temperature;
-      this->last_humidity_ = humidity;
-      this->last_voc_ = voc;
-      this->last_nox_ = nox;
-      this->last_hcho_ = hcho;
-      this->last_co2_ = co2;
-      this->has_last_values_ = true;
-
-      const uint32_t check_time = App.get_loop_component_start_time();
-      if (check_time < this->startup_stable_after_) {
-        ESP_LOGV(TAG, "Startup stabilization in progress, skipping publish");
-        const uint32_t remaining_ms = this->startup_stable_after_ - check_time;
-        const uint32_t remaining_ms_clamped = remaining_ms < 1000 ? 0 : remaining_ms;
-        ESP_LOGD(TAG, "Startup delay active (%u ms left), ignored values from sensor",
-                 static_cast<unsigned>(remaining_ms_clamped));
+      const uint32_t now = App.get_loop_component_start_time();
+      if (now < this->startup_stable_after_) {
+        ESP_LOGD(TAG, "Startup delay active, ignoring sensor values");
         this->status_clear_warning();
         return;
       }
@@ -450,51 +371,20 @@ void SEN6XComponent::update() {
   (*poll_ready)(poll_retries);
 }
 
-bool SEN6XComponent::reset_device() {
-  const uint32_t now = App.get_loop_component_start_time();
-  if (this->last_stop_ms_ != 0 && (now - this->last_stop_ms_) < 50) {
-    const uint32_t wait_ms = 50 - (now - this->last_stop_ms_);
-    this->set_timeout(wait_ms, [this]() { this->reset_device(); });
-    return true;
-  }
-  if (!this->write_command(SEN6X_CMD_RESET)) {
-    this->status_set_warning();
-    ESP_LOGE(TAG, "write error device reset (%d)", this->last_error_);
-    return false;
-  }
-  this->set_timeout(1200, [this]() { ESP_LOGD(TAG, "Reset complete"); });
-  return true;
+SEN6XComponent::Sen6xType SEN6XComponent::infer_type_from_product_name_(const std::string &product_name) {
+  if (product_name == "SEN62")
+    return SEN62;
+  if (product_name == "SEN63C")
+    return SEN63C;
+  if (product_name == "SEN65")
+    return SEN65;
+  if (product_name == "SEN66")
+    return SEN66;
+  if (product_name == "SEN68")
+    return SEN68;
+  if (product_name == "SEN69C")
+    return SEN69C;
+  return UNKNOWN;
 }
 
-bool SEN6XComponent::start_measurement() {
-  const uint32_t now = App.get_loop_component_start_time();
-  if (this->last_stop_ms_ != 0 && (now - this->last_stop_ms_) < 1400) {
-    const uint32_t wait_ms = 1400 - (now - this->last_stop_ms_);
-    this->set_timeout(wait_ms, [this]() { this->start_measurement(); });
-    return true;
-  }
-  if (!this->write_command(SEN6X_CMD_START_MEASUREMENTS)) {
-    this->status_set_warning();
-    ESP_LOGE(TAG, "write error start measurement (%d)", this->last_error_);
-    return false;
-  }
-  this->measurement_started_ = true;
-  this->startup_stable_after_ = now + this->startup_delay_ms_;
-  ESP_LOGD(TAG, "Measurement started");
-  return true;
-}
-
-bool SEN6XComponent::stop_measurement() {
-  if (!this->write_command(SEN6X_CMD_STOP_MEASUREMENTS)) {
-    this->status_set_warning();
-    ESP_LOGE(TAG, "write error stop measurement (%d)", this->last_error_);
-    return false;
-  }
-  this->measurement_started_ = false;
-  this->last_stop_ms_ = App.get_loop_component_start_time();
-  ESP_LOGD(TAG, "Measurement stopped");
-  return true;
-}
-
-}  // namespace sen6x
-}  // namespace esphome
+}  // namespace esphome::sen6x
