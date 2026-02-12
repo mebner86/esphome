@@ -1,8 +1,6 @@
 sensor:
-  # Test with explicit type parameter
   - platform: sen6x
     id: sen6x_sensor
-    type: SEN69C
     i2c_id: i2c_bus
     temperature:
       name: Temperature
@@ -30,25 +28,8 @@ sensor:
       name: NOx
     voc:
       name: VOC
-      algorithm_tuning:
-        index_offset: 100
-        learning_time_offset_hours: 12
-        learning_time_gain_hours: 12
-        gating_max_duration_minutes: 180
-        std_initial: 50
-        gain_factor: 230
     co2:
       name: Carbon Dioxide
-      ambient_pressure_compensation:
-        pressure: 1013
-      altitude_compensation:
-        altitude: 0
-    formaldehyde:
+    hcho:
       name: Formaldehyde
-    temperature_compensation:
-      offset: 0
-      normalized_offset_slope: 0
-      time_constant: 0
-      slot: 0
-    store_baseline: true
     address: 0x6B

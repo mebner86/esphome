@@ -7,59 +7,6 @@
 namespace esphome {
 namespace sen6x {
 
-template<typename... Ts> class StartFanAction : public Action<Ts...> {
- public:
-  explicit StartFanAction(SEN6XComponent *sen6x) : sen6x_(sen6x) {}
-
-  void play(Ts... x) override { this->sen6x_->start_fan_cleaning(); }
-
- protected:
-  SEN6XComponent *sen6x_;
-};
-
-template<typename... Ts> class PerformForcedCO2RecalibrationAction : public Action<Ts...> {
- public:
-  explicit PerformForcedCO2RecalibrationAction(SEN6XComponent *sen6x) : sen6x_(sen6x) {}
-
-  void set_reference(TemplatableValue<uint16_t, Ts...> reference) { reference_ = reference; }
-
-  void play(Ts... x) override { this->sen6x_->perform_forced_co2_recalibration(this->reference_.value(x...)); }
-
- protected:
-  SEN6XComponent *sen6x_;
-  TemplatableValue<uint16_t, Ts...> reference_;
-};
-
-template<typename... Ts> class CO2SensorFactoryResetAction : public Action<Ts...> {
- public:
-  explicit CO2SensorFactoryResetAction(SEN6XComponent *sen6x) : sen6x_(sen6x) {}
-
-  void play(Ts... x) override { this->sen6x_->co2_sensor_factory_reset(); }
-
- protected:
-  SEN6XComponent *sen6x_;
-};
-
-template<typename... Ts> class ActivateSHTHeaterAction : public Action<Ts...> {
- public:
-  explicit ActivateSHTHeaterAction(SEN6XComponent *sen6x) : sen6x_(sen6x) {}
-
-  void play(Ts... x) override { this->sen6x_->activate_sht_heater(); }
-
- protected:
-  SEN6XComponent *sen6x_;
-};
-
-template<typename... Ts> class GetSHTHeaterMeasurementsAction : public Action<Ts...> {
- public:
-  explicit GetSHTHeaterMeasurementsAction(SEN6XComponent *sen6x) : sen6x_(sen6x) {}
-
-  void play(Ts... x) override { this->sen6x_->get_sht_heater_measurements(); }
-
- protected:
-  SEN6XComponent *sen6x_;
-};
-
 template<typename... Ts> class StartMeasurementAction : public Action<Ts...> {
  public:
   explicit StartMeasurementAction(SEN6XComponent *sen6x) : sen6x_(sen6x) {}
@@ -78,30 +25,6 @@ template<typename... Ts> class StopMeasurementAction : public Action<Ts...> {
 
  protected:
   SEN6XComponent *sen6x_;
-};
-
-template<typename... Ts> class SetTemperatureCompensationAction : public Action<Ts...> {
- public:
-  explicit SetTemperatureCompensationAction(SEN6XComponent *sen6x) : sen6x_(sen6x) {}
-
-  void set_offset(TemplatableValue<float, Ts...> offset) { offset_ = offset; }
-  void set_normalized_offset_slope(TemplatableValue<float, Ts...> normalized_offset_slope) {
-    normalized_offset_slope_ = normalized_offset_slope;
-  }
-  void set_time_constant(TemplatableValue<uint16_t, Ts...> time_constant) { time_constant_ = time_constant; }
-  void set_slot(TemplatableValue<uint16_t, Ts...> slot) { slot_ = slot; }
-
-  void play(Ts... x) override {
-    this->sen6x_->apply_temperature_compensation(this->offset_.value(x...), this->normalized_offset_slope_.value(x...),
-                                                 this->time_constant_.value(x...), this->slot_.value(x...));
-  }
-
- protected:
-  SEN6XComponent *sen6x_;
-  TemplatableValue<float, Ts...> offset_;
-  TemplatableValue<float, Ts...> normalized_offset_slope_;
-  TemplatableValue<uint16_t, Ts...> time_constant_;
-  TemplatableValue<uint16_t, Ts...> slot_;
 };
 
 }  // namespace sen6x
